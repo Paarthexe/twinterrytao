@@ -2,7 +2,7 @@
 
 ## Features
 
-1. **Conversational Digital Twin**: Chat with a  mathematician Terence Tao.
+1. **Conversational Digital Twin**: Chat with mathematician Terence Tao.
 2. **Context-Aware Memory**: Remembers user facts, notable questions, and topics discussed across sessions.
 3. **Concept Explorer**: Generates an interactive graph of related mathematical subtopics, allowing users to click nodes for custom RAG explanations.
 
