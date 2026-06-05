@@ -1,0 +1,14 @@
+---
+title: "Resonant decompositions and the I-method for NLS on R^2"
+source: "terrytao.wordpress.com"
+url: "https://terrytao.wordpress.com/2007/01/31/resonant-decompositions-and-the-i-method-for-nls-on-r2/"
+date: "2007-01-31"
+categories: ["pde", "harmonic analysis", "nonlinear schrodinger equation", "expository"]
+---
+My paper “Resonant decompositions and the I-method for the cubic nonlinear Schrodinger equation on {\Bbb R}^2“, with Jim Colliander, Mark Keel, Gigliola Staffilani, and Hideo Takaoka (aka the “I-team“), has just been uploaded to the arXiv, and submitted to DCDS-A. In this (long-delayed!) paper, we improve our previous result on the global well-posedness of the cubic non-linear defocusing Schrödinger equation
+
+i u_t+ \Delta u = |u|^2 u
+
+in two spatial dimensions, thus u: {\Bbb R} \times {\Bbb R}^2 \to {\Bbb C}. In that paper we used the “first generation I-method” (centred around an almost conservation law for a mollified energy E(Iu)) to obtain global well-posedness in H^s({\Bbb R}^2) for s > 4/7 (improving on an earlier result of s > 2/3 by Bourgain). Here we use the “second generation I-method”, in which the mollified energy E(Iu) is adjusted by a correction term to damp out “non-resonant interactions” and thus lead to an improved almost conservation law, and ultimately to an improvement of the well-posedness range to s > 1/2. (The conjectured region is s \geq 0; beyond that, the solution becomes unstable and even local well-posedness is not known.) A similar result (but using Morawetz estimates instead of correction terms) has recently been established by Colliander-Grillakis-Tzirakis; this attains the superior range of s > 2/5, but in the focusing case it does not give global existence all the way up to the ground state due to a slight inefficiency in the Morawetz estimate approach. Our method is in fact rather robust and indicates that the “first-generation” I-method can be pushed further for a large class of dispersive PDE.
+
+The correction method technique was already utilised by us for the Korteweg-de Vries and one-dimensional NLS equations. However, in this two-dimensional, not-completely-integrable setting, the resonant interactions are far more significant and cannot be entirely eliminated via a correction term. However, by using an angular refinement of the standard bilinear Strichartz estimate, in conjunction with an improved multiplier estimate (stemming ultimately from the cosine rule, of all things) to partially counteract the “small divisor” problem in the resonant interaction case, we can obtain the range s > 1/2. The same result holds in the focusing case, except we must impose the standard condition that the mass of the initial data is strictly less than that of the ground state: \|u(0)\|_{L^2} < \|Q\|_{L^2}.

@@ -1,7 +1,6 @@
 import json
 import os
 from datetime import datetime
-from typing import List, Dict, Optional
 LONG_TERM_MEMORY_PATH = 'long_term_memory.json'
 
 def load_long_term_memory():

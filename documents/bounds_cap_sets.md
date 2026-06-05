@@ -1,0 +1,15 @@
+---
+title: "Open question: bounds for cap sets"
+source: "terrytao.wordpress.com"
+url: "https://terrytao.wordpress.com/2007/02/23/open-question-bounds-for-cap-sets/"
+date: "2007-02-23"
+categories: ["combinatorics", "additive combinatorics", "open questions", "expository"]
+---
+Earlier this month, in the previous incarnation of this page, I posed a question which I thought was unsolved, and obtained the answer (in fact, it was solved 25 years ago) within a week. Now that this new version of the page has better feedback capability, I am now tempted to try again, since I have a large number of such questions which I would like to publicise. (Actually, I even have a secret web page full of these somewhere near my home page, though it will take a non-trivial amount of effort to find it!)
+
+Perhaps my favourite open question is the problem on the maximal size of a cap set – a subset of {\Bbb F}^n_3 ({\Bbb F}_3 being the finite field of three elements) which contains no lines, or equivalently no non-trivial arithmetic progressions of length three. As an upper bound, one can easily modify the proof of Roth’s theorem to show that cap sets must have size O(3^n/n) (see e.g. this paper of Meshulam). This of course is better than the trivial bound of 3^n once n is large. In the converse direction, the trivial example \{0,1\}^n shows that cap sets can be as large as 2^n; the current world record is (2.2174\ldots)^n, held by Edel. The gap between these two bounds is rather enormous; I would be very interested in either an improvement of the upper bound to o(3^n/n), or an improvement of the lower bound to (3-o(1))^n. (I believe both improvements are true, though a good friend of mine disagrees about the improvement to the lower bound.)
+
+
+One reason why I find this question important is that it serves as an excellent model for the analogous question of finding large sets without progressions of length three in the interval \{1,\ldots,N\}. Here, the best upper bound of O(N \sqrt{\frac{\log \log N}{\log N}}) is due to Bourgain (he also has a recent, not yet published, improvement to O(N \frac{(\log \log N)^2}{\log^{2/3} N}), while the best lower bound of N e^{-C\sqrt{\log N}} is an ancient result of Behrend. Using the finite field heuristic that {\Bbb F}^n_3 “behaves like” \{1,\ldots,3^n\}, we see that the Bourgain bound should be improvable to O(\frac{N}{\log N}), whereas the Edel bound should be improvable to something like 3^n e^{-C\sqrt{n}}. However, neither argument extends easily to the other setting. Note that a (still open) conjecture of Erdős-Turán is essentially equivalent (for progressions of length three, up to log log factors) to the problem of improving the Bourgain bound to o(\frac{N}{\log N}).
+
+The Roth bound of O(3^n/n) appears to be the natural limit of the purely Fourier-analytic approach of Roth, and so any breakthrough would be extremely interesting, as it almost certainly would need a radically new idea. The lower bound might be improvable by some sort of algebraic geometry construction, though it is not clear at all how to achieve this.
