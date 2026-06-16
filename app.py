@@ -2,127 +2,26 @@ import os
 import json
 import streamlit as st
 from datetime import datetime
-import google.generativeai as genai
 
-from prompts import SYSTEM_PROMPT, GRAPH_PROMPT, EXPLAIN_PROMPT, FACT_EXTRACTION_PROMPT
 from memory import (
     load_long_term_memory,
     save_long_term_memory,
     add_notable_question,
-    format_long_term_context,
     init_session_memory,
     add_message,
     get_api_messages,
     get_display_messages,
     extract_topics_from_exchange
 )
-from rag import get_retriever
+from model import (
+    generate_topic_graph,
+    explain_graph_topic,
+    send_message,
+    should_check_for_facts,
+    extract_and_save_user_fact
+)
 
 from streamlit_agraph import agraph, Node, Edge, Config
-
-def configure_gemini(api_key=None):
-    if not api_key:
-        api_key = os.environ.get('GEMINI_API_KEY')
-    genai.configure(api_key=api_key)
-
-def generate_topic_graph(topic, api_key=None):
-    configure_gemini(api_key)
-    prompt = GRAPH_PROMPT.format(topic=topic)
-    model_instance = genai.GenerativeModel('gemini-2.5-flash')
-    response = model_instance.generate_content(
-        prompt,
-        generation_config=genai.types.GenerationConfig(
-            response_mime_type="application/json"
-        )
-    )
-    
-    text = response.text.strip()
-    try:
-        return json.loads(text)
-    except Exception:
-        if text.startswith("```json"):
-            text = text[7:]
-        if text.endswith("```"):
-            text = text[:-3]
-        return json.loads(text.strip())
-
-def explain_graph_topic(topic_label, core_topic, api_key=None):
-    configure_gemini(api_key)
-    retriever = get_retriever()
-    rag_context = retriever.format_context(topic_label, top_k=2)
-    
-    prompt = EXPLAIN_PROMPT.format(
-        topic_label=topic_label,
-        core_topic=core_topic,
-        rag_context=rag_context
-    )
-    model_instance = genai.GenerativeModel('gemini-2.5-flash')
-    response = model_instance.generate_content(prompt)
-    return response.text
-
-def build_system_prompt(user_query, long_term_memory):
-    retriever = get_retriever()
-    rag_context = retriever.format_context(user_query, top_k=3)
-    memory_context = format_long_term_context(long_term_memory)
-    return SYSTEM_PROMPT.format(rag_context=rag_context, memory_context=memory_context)
-
-def send_message(user_message, conversation_history, long_term_memory, api_key=None, model_name='gemini-2.5-flash', stream=True):
-    configure_gemini(api_key)
-    system_prompt = build_system_prompt(user_message, long_term_memory)
-    model_instance = genai.GenerativeModel(
-        model_name=model_name,
-        system_instruction=system_prompt,
-        generation_config=genai.types.GenerationConfig(temperature=0.85, top_p=0.95, max_output_tokens=4096)
-    )
-    history = []
-    for msg in conversation_history[:-1]:
-        role = 'user' if msg['role'] == 'user' else 'model'
-        history.append({'role': role, 'parts': [msg['content']]})
-    chat = model_instance.start_chat(history=history)
-    if stream:
-        response = chat.send_message(user_message, stream=True)
-        for chunk in response:
-            try:
-                if chunk.text:
-                    yield chunk.text
-            except (ValueError, AttributeError, IndexError):
-                pass
-    else:
-        response = chat.send_message(user_message)
-        yield response.text
-
-def should_check_for_facts(message):
-    message_lower = message.lower()
-    first_person_words = {'i', "i'm", "i've", "i'd", "i'll", 'my', 'me', 'myself', 'mine', 'we', 'our', 'us'}
-    words = set(message_lower.split())
-    if not words.intersection(first_person_words):
-        return False
-    personal_keywords = {
-        'study', 'studies', 'student', 'research', 'work', 'working', 'interest', 'interested',
-        'background', 'learn', 'learning', 'phd', 'degree', 'major', 'math', 'mathematician',
-        'familiar', 'read', 'reading', 'solve', 'solving', 'class', 'course', 'university',
-        'college', 'professor', 'school'
-    }
-    return any((kw in message_lower for kw in personal_keywords))
-
-def extract_and_save_user_fact(user_message, api_key):
-    configure_gemini(api_key)
-    prompt = FACT_EXTRACTION_PROMPT.format(user_message=user_message[:300])
-    model_instance = genai.GenerativeModel('gemini-2.5-flash')
-    try:
-        response = model_instance.generate_content(prompt)
-        fact = response.text.strip()
-        if fact and fact != 'NONE':
-            memory = st.session_state.long_term_memory
-            if 'user_facts' not in memory:
-                memory['user_facts'] = []
-            if fact not in memory['user_facts']:
-                memory['user_facts'].append(fact)
-                if len(memory['user_facts']) > 30:
-                    memory['user_facts'] = memory['user_facts'][-30:]
-                save_long_term_memory(memory)
-    except Exception:
-        pass
 
 st.set_page_config(page_title='Terence Tao AI', layout='wide')
 
@@ -130,8 +29,6 @@ if 'session_memory' not in st.session_state:
     st.session_state.session_memory = init_session_memory()
 if 'long_term_memory' not in st.session_state:
     st.session_state.long_term_memory = load_long_term_memory()
-if 'retriever' not in st.session_state:
-    st.session_state.retriever = get_retriever()
 if 'session_saved' not in st.session_state:
     st.session_state.session_saved = False
 if 'suggested_q' not in st.session_state:
@@ -144,9 +41,6 @@ if 'selected_node_id' not in st.session_state:
     st.session_state.selected_node_id = None
 if 'node_explanation' not in st.session_state:
     st.session_state.node_explanation = None
-
-api_key = os.environ.get('GEMINI_API_KEY')
-model = 'gemini-2.5-flash'
 
 title_col, new_chat_col, clear_mem_col = st.columns([4, 1, 1])
 with title_col:
@@ -184,16 +78,8 @@ with chat_tab:
             else:
                 with st.chat_message('assistant'):
                     st.markdown(msg['content'])
-                    
-    if msgs and msgs[-1]['role'] == 'assistant':
-        last_user_msgs = [m for m in msgs if m['role'] == 'user']
-        if last_user_msgs:
-            last_query = last_user_msgs[-1]['content']
-            retrieved = st.session_state.retriever.retrieve(last_query, top_k=3)
-            if retrieved:
-                sources = [doc['title'] for doc, score in retrieved if score > 0.02]
-                if sources:
-                    st.caption("Retrieved sources: " + ", ".join(sources))
+                    if 'sources' in msg and msg['sources']:
+                        st.caption("Retrieved sources: " + ", ".join(msg['sources']))
                 
     col_input, col_btn = st.columns([5, 1])
     with col_input:
@@ -206,24 +92,24 @@ with chat_tab:
         add_message(st.session_state.session_memory, 'user', query)
         add_notable_question(st.session_state.long_term_memory, query)
         if should_check_for_facts(query):
-            extract_and_save_user_fact(query, api_key)
+            extract_and_save_user_fact(query, st.session_state.long_term_memory)
             
         with st.chat_message('assistant'):
             try:
-                full_response = st.write_stream(send_message(user_message=query, conversation_history=get_api_messages(st.session_state.session_memory), long_term_memory=st.session_state.long_term_memory, api_key=api_key, model_name=model, stream=True))
+                full_response = st.write_stream(send_message(user_message=query, conversation_history=get_api_messages(st.session_state.session_memory), long_term_memory=st.session_state.long_term_memory, stream=True))
             except Exception as e:
                 error_msg = str(e)
-                if 'API_KEY' in error_msg.upper():
-                    st.error('Invalid or missing API key. Check your Gemini API key.')
-                elif 'QUOTA' in error_msg.upper():
-                    st.error('API quota exceeded. Please try again later.')
-                else:
-                    st.error(f'Error calling Gemini API: {error_msg}')
+                st.error(f'Error calling Ollama API: {error_msg}')
                 st.session_state.session_memory['messages'].pop()
                 st.session_state.session_memory['display_messages'].pop()
                 st.stop()
                 
+        sources = st.session_state.get('current_sources', [])
         add_message(st.session_state.session_memory, 'assistant', full_response)
+        if sources:
+            st.session_state.session_memory['messages'][-1]['sources'] = sources
+            st.session_state.session_memory['display_messages'][-1]['sources'] = sources
+            
         topics = extract_topics_from_exchange(query, full_response)
         for topic in topics:
             if topic not in st.session_state.session_memory['topics_this_session']:
@@ -231,6 +117,7 @@ with chat_tab:
                 if topic not in st.session_state.long_term_memory['discussed_topics']:
                     st.session_state.long_term_memory['discussed_topics'].append(topic)
         save_long_term_memory(st.session_state.long_term_memory)
+        st.session_state['current_sources'] = None
         st.rerun()
         
     msg_count = len([m for m in get_display_messages(st.session_state.session_memory) if m['role'] == 'user'])
@@ -316,7 +203,7 @@ with explore_tab:
         
         with st.spinner(f"Mapping knowledge for '{st.session_state.explore_topic}'..."):
             try:
-                st.session_state.explore_graph = generate_topic_graph(st.session_state.explore_topic, api_key)
+                st.session_state.explore_graph = generate_topic_graph(st.session_state.explore_topic)
             except Exception as e:
                 st.error(f"Failed to generate knowledge map: {e}")
                 st.session_state.explore_graph = None
@@ -387,8 +274,7 @@ with explore_tab:
                         try:
                             st.session_state.node_explanation = explain_graph_topic(
                                 topic_label=node_item['label'],
-                                core_topic=st.session_state.explore_topic,
-                                api_key=api_key
+                                core_topic=st.session_state.explore_topic
                             )
                         except Exception as e:
                             st.session_state.node_explanation = f"Error generating explanation: {e}"

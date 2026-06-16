@@ -1,5 +1,6 @@
 streamlit
 chromadb
-google-generativeai
+requests
 pyyaml
 streamlit-agraph
+rank-bm25
