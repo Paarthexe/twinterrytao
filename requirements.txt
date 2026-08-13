@@ -4,3 +4,5 @@ requests
 pyyaml
 streamlit-agraph
 rank-bm25
+flask
+flask-cors
