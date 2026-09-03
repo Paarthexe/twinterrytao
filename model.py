@@ -18,11 +18,16 @@ from memory import (
 from rag import get_retriever
 
 OLLAMA_URL = os.environ.get('OLLAMA_URL', 'http://localhost:11434')
+OLLAMA_MODEL = os.environ.get('OLLAMA_MODEL', 'gemma4:e2b')
 
-def ollama_chat(messages, stream=False, json_format=False):
+def get_current_model_name():
+    return OLLAMA_MODEL
+
+def ollama_chat(messages, stream=False, json_format=False, model=None):
     url = f"{OLLAMA_URL}/api/chat"
+    target_model = model or OLLAMA_MODEL
     payload = {
-        "model": "gemma4:e4b",
+        "model": target_model,
         "messages": messages,
         "stream": stream
     }
@@ -33,7 +38,7 @@ def ollama_chat(messages, stream=False, json_format=False):
         payload["options"] = {"temperature": 0.85, "top_p": 0.95}
         
     try:
-        response = requests.post(url, json=payload, stream=stream)
+        response = requests.post(url, json=payload, stream=stream, timeout=60)
         response.raise_for_status()
         
         if stream:
@@ -47,7 +52,7 @@ def ollama_chat(messages, stream=False, json_format=False):
             result = response.json()
             yield result.get('message', {}).get('content', '')
     except Exception as e:
-        raise RuntimeError(f"Error communicating with Ollama: {e}")
+        raise RuntimeError(f"Error communicating with Ollama ({target_model}): {e}")
 
 def ollama_chat_sync(messages, json_format=False):
     generator = ollama_chat(messages, stream=False, json_format=json_format)
@@ -164,33 +169,46 @@ def extract_and_save_user_fact(user_message, long_term_memory):
     except Exception:
         pass
 
-def send_message(user_message, conversation_history, long_term_memory, stream=True):
+def send_message_detailed(user_message, conversation_history, long_term_memory):
+    """
+    Orchestrates draft generation, skeptic peer review audit, and final revision,
+    yielding structured event dictionaries:
+      - {'type': 'phase', 'phase': 'retrieving', 'sources': sources}
+      - {'type': 'phase', 'phase': 'drafting'}
+      - {'type': 'draft', 'content': draft_answer}
+      - {'type': 'phase', 'phase': 'auditing'}
+      - {'type': 'audit', 'data': audit_data}
+      - {'type': 'phase', 'phase': 'revising'} (if revision occurred)
+      - {'type': 'chunk', 'content': token}
+      - {'type': 'done', 'response': final_answer, 'audit': audit_data, 'sources': sources}
+    """
     rag_context, sources = get_multi_hop_context(user_message, top_k=3)
     memory_context = format_long_term_context(long_term_memory)
     
-    try:
-        import streamlit as st
-        st.session_state['current_sources'] = sources
-    except Exception:
-        pass
-        
+    yield {"type": "phase", "phase": "retrieving", "sources": sources}
+    
     retrieved_context = f"RAG Context:\n{rag_context}\n\nMemory Context:\n{memory_context}"
     system_prompt = SYSTEM_PROMPT.format(rag_context=rag_context, memory_context=memory_context)
     
     messages = [{'role': 'system', 'content': system_prompt}]
     for msg in conversation_history[:-1]:
-        role = 'user' if msg['role'] == 'user' else 'assistant'
-        messages.append({'role': role, 'content': msg['content']})
+        role = 'user' if msg.get('role') == 'user' else 'assistant'
+        messages.append({'role': role, 'content': msg.get('content', '')})
     messages.append({'role': 'user', 'content': user_message})
     
+    yield {"type": "phase", "phase": "drafting"}
     draft_answer = ollama_chat_sync(messages)
+    yield {"type": "draft", "content": draft_answer}
     
+    yield {"type": "phase", "phase": "auditing"}
     skeptic_result = run_skeptic(user_message, retrieved_context, draft_answer)
     status = skeptic_result.get("status", "pass")
     issues = skeptic_result.get("issues", [])
     advice = skeptic_result.get("advice", "")
-
+    
+    extra_sources = []
     if status == "revise" and len(issues) > 0:
+        yield {"type": "phase", "phase": "revising"}
         print(f"[Skeptic] Status: REVISE. Issues: {issues}")
         extra_queries = skeptic_result.get("queries", [])
         if extra_queries:
@@ -206,22 +224,55 @@ def send_message(user_message, conversation_history, long_term_memory, stream=Tr
                         extra_parts.append(f"[SOURCE: {doc['source']}]\nTopic: {doc['title']}\n{content_stripped}")
                         if doc['title'] not in sources:
                             sources.append(doc['title'])
-            try:
-                import streamlit as st
-                st.session_state['current_sources'] = sources
-            except Exception:
-                pass
+                            extra_sources.append(doc['title'])
             extra_context = "\n\n---\n\n".join(extra_parts) if extra_parts else ""
-            combined_context = rag_context
-            if extra_context:
-                combined_context = f"{rag_context}\n\n---\n\n{extra_context}"
+            combined_context = f"{rag_context}\n\n---\n\n{extra_context}" if extra_context else rag_context
         else:
             combined_context = rag_context
+            
         final_answer = run_revision(user_message, combined_context, draft_answer, issues, advice)
     else:
         print("[Skeptic] Status: PASS.")
         final_answer = draft_answer
-
+        
+    audit_data = {
+        "status": status,
+        "issues": issues,
+        "advice": advice,
+        "draft": draft_answer,
+        "extra_sources": extra_sources,
+        "checked_sources": sources
+    }
+    
+    yield {"type": "audit", "data": audit_data}
+    
     chunk_size = 8
     for i in range(0, len(final_answer), chunk_size):
-        yield final_answer[i:i+chunk_size]
+        yield {"type": "chunk", "content": final_answer[i:i+chunk_size]}
+        
+    yield {
+        "type": "done",
+        "response": final_answer,
+        "audit": audit_data,
+        "sources": sources
+    }
+
+def send_message(user_message, conversation_history, long_term_memory, stream=True):
+    """Backwards-compatible helper that yields response text chunks and saves audit to streamlit session if available."""
+    final_answer = ""
+    audit_data = None
+    sources = []
+    
+    for event in send_message_detailed(user_message, conversation_history, long_term_memory):
+        if event["type"] == "chunk":
+            yield event["content"]
+        elif event["type"] == "done":
+            final_answer = event["response"]
+            audit_data = event.get("audit")
+            sources = event.get("sources", [])
+            try:
+                import streamlit as st
+                st.session_state['current_sources'] = sources
+                st.session_state['last_audit'] = audit_data
+            except Exception:
+                pass

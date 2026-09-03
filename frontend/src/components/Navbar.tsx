@@ -1,14 +1,17 @@
-import React from 'react';
-import { MessageSquare, BrainCircuit, Network, RefreshCw, Trash2, Cpu, Database } from 'lucide-react';
+import { MessageSquare, BrainCircuit, Network, RefreshCw, Trash2, Cpu, Database, DownloadCloud, FileText } from 'lucide-react';
 
 interface NavbarProps {
   activeTab: 'chat' | 'memory' | 'explore';
   setActiveTab: (tab: 'chat' | 'memory' | 'explore') => void;
   onNewChat: () => void;
   onClearMemory: () => void;
+  onSyncBlog?: () => void;
+  onSyncArxiv?: () => void;
+  isSyncing?: boolean;
   systemStatus: {
     status: string;
     chroma_items: number;
+    documents_count?: number;
     model: string;
   } | null;
 }
@@ -18,6 +21,9 @@ export const Navbar: React.FC<NavbarProps> = ({
   setActiveTab,
   onNewChat,
   onClearMemory,
+  onSyncBlog,
+  onSyncArxiv,
+  isSyncing = false,
   systemStatus,
 }) => {
   return (
@@ -87,13 +93,37 @@ export const Navbar: React.FC<NavbarProps> = ({
               <Cpu className="w-3 h-3 text-slate-400" />
               <span>{systemStatus?.model || 'gemma4:e4b'}</span>
             </div>
-            <div className="flex items-center gap-1.5 text-[11px] font-mono text-slate-400 bg-slate-900 px-2.5 py-1 rounded-md border border-slate-800">
+            <div className="flex items-center gap-1.5 text-[11px] font-mono text-slate-400 bg-slate-900 px-2.5 py-1 rounded-md border border-slate-800" title="Total Indexed Documents & Chunks">
               <Database className="w-3 h-3 text-slate-400" />
-              <span>{systemStatus ? `${systemStatus.chroma_items} vectors` : 'Chroma RAG'}</span>
+              <span>{systemStatus ? `${systemStatus.documents_count ?? '–'} docs (${systemStatus.chroma_items} vectors)` : 'Chroma RAG'}</span>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
+            {onSyncBlog && (
+              <button
+                onClick={onSyncBlog}
+                disabled={isSyncing}
+                className="flex items-center gap-1.5 text-xs font-medium text-emerald-300 hover:text-emerald-100 bg-emerald-950/40 hover:bg-emerald-900/60 disabled:opacity-50 px-3 py-1.5 rounded-lg border border-emerald-800/60 transition shadow-sm"
+                title="Scrape and sync latest posts from Terence Tao's blog"
+              >
+                <DownloadCloud className={`w-3.5 h-3.5 ${isSyncing ? 'animate-bounce text-emerald-400' : ''}`} />
+                <span>{isSyncing ? 'Syncing...' : 'Sync Blog'}</span>
+              </button>
+            )}
+
+            {onSyncArxiv && (
+              <button
+                onClick={onSyncArxiv}
+                disabled={isSyncing}
+                className="flex items-center gap-1.5 text-xs font-medium text-indigo-300 hover:text-indigo-100 bg-indigo-950/40 hover:bg-indigo-900/60 disabled:opacity-50 px-3 py-1.5 rounded-lg border border-indigo-800/60 transition shadow-sm"
+                title="Discover and ingest arXiv research papers cited in blog posts"
+              >
+                <FileText className="w-3.5 h-3.5 text-indigo-400" />
+                <span>Sync arXiv</span>
+              </button>
+            )}
+
             <button
               onClick={onNewChat}
               className="flex items-center gap-1.5 text-xs font-medium text-slate-300 hover:text-slate-100 bg-slate-800/80 hover:bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700 transition"

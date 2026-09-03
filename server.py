@@ -13,11 +13,14 @@ from model import (
     generate_topic_graph,
     explain_graph_topic,
     send_message,
+    send_message_detailed,
+    get_current_model_name,
     should_check_for_facts,
     extract_and_save_user_fact,
     get_multi_hop_context
 )
 from rag import get_retriever
+from scraper import list_local_documents
 
 app = Flask(__name__)
 CORS(app)
@@ -26,14 +29,82 @@ CORS(app)
 def health_check():
     try:
         retriever = get_retriever()
-        items = retriever.collection.count()
+        stats = retriever.get_stats()
+        items = stats["chunks_count"]
+        docs_count = stats["documents_count"]
     except Exception as e:
         items = 0
+        docs_count = 0
     return jsonify({
         "status": "ok",
         "chroma_items": items,
-        "model": "gemma4:e4b"
+        "documents_count": docs_count,
+        "model": get_current_model_name()
     })
+
+@app.route('/api/documents', methods=['GET'])
+def get_documents():
+    try:
+        retriever = get_retriever()
+        docs = list_local_documents()
+        stats = retriever.get_stats()
+        return jsonify({
+            "status": "success",
+            "documents": docs,
+            "stats": stats
+        })
+    except Exception as e:
+        return jsonify({"error": f"Failed to list documents: {str(e)}"}), 500
+
+@app.route('/api/documents/sync', methods=['POST'])
+def sync_documents():
+    data = request.json or {}
+    count = int(data['count']) if 'count' in data and data['count'] is not None else None
+    all_posts = bool(data.get('all', count is None))
+    category = data.get('category') or None
+    search = data.get('search') or None
+    tag = data.get('tag') or None
+    force = bool(data.get('force', False))
+    
+    try:
+        retriever = get_retriever()
+        summary = retriever.sync_from_web(
+            count=count,
+            all_posts=all_posts,
+            category=category,
+            search=search,
+            tag=tag,
+            force=force
+        )
+        stats = retriever.get_stats()
+        return jsonify({
+            "status": "success",
+            "message": f"Successfully processed {summary['total_fetched']} posts from Terence Tao's blog.",
+            "summary": summary,
+            "stats": stats
+        })
+    except Exception as e:
+        return jsonify({"error": f"Failed to sync documents: {str(e)}"}), 500
+
+@app.route('/api/arxiv/sync', methods=['POST'])
+def sync_arxiv():
+    data = request.json or {}
+    max_papers = int(data.get('max_papers', 50))
+    force = bool(data.get('force', False))
+    
+    try:
+        retriever = get_retriever()
+        summary = retriever.sync_arxiv(max_papers=max_papers, force=force)
+        stats = retriever.get_stats()
+        return jsonify({
+            "status": "success",
+            "message": f"Successfully ingested {summary['total_saved']} arXiv research papers.",
+            "summary": summary,
+            "stats": stats
+        })
+    except Exception as e:
+        return jsonify({"error": f"Failed to sync arXiv papers: {str(e)}"}), 500
+
 
 @app.route('/api/memory', methods=['GET'])
 def get_memory():
@@ -82,17 +153,20 @@ def chat():
     if should_check_for_facts(message):
         extract_and_save_user_fact(message, long_term_memory)
         
-    rag_context, sources = get_multi_hop_context(message, top_k=3)
+    full_response = ""
+    audit_data = None
+    sources = []
     
-    chunks = list(send_message(
+    for event in send_message_detailed(
         user_message=message,
         conversation_history=history,
-        long_term_memory=long_term_memory,
-        stream=True
-    ))
-    
-    full_response = "".join(chunks)
-    
+        long_term_memory=long_term_memory
+    ):
+        if event["type"] == "done":
+            full_response = event["response"]
+            audit_data = event.get("audit")
+            sources = event.get("sources", [])
+            
     topics = extract_topics_from_exchange(message, full_response)
     updated_topics = False
     for topic in topics:
@@ -108,6 +182,7 @@ def chat():
     return jsonify({
         "response": full_response,
         "sources": sources,
+        "audit": audit_data,
         "topics": topics
     })
 
@@ -126,22 +201,30 @@ def chat_stream():
     if should_check_for_facts(message):
         extract_and_save_user_fact(message, long_term_memory)
         
-    rag_context, sources = get_multi_hop_context(message, top_k=3)
-    
     def generate():
-        yield f"data: {json.dumps({'type': 'meta', 'sources': sources})}\n\n"
+        full_response = ""
+        audit_data = None
+        sources = []
         
-        full_text = []
-        for chunk in send_message(
+        for event in send_message_detailed(
             user_message=message,
             conversation_history=history,
-            long_term_memory=long_term_memory,
-            stream=True
+            long_term_memory=long_term_memory
         ):
-            full_text.append(chunk)
-            yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
-            
-        full_response = "".join(full_text)
+            if event["type"] == "phase":
+                yield f"data: {json.dumps({'type': 'phase', 'phase': event['phase'], 'sources': event.get('sources', [])})}\n\n"
+            elif event["type"] == "draft":
+                yield f"data: {json.dumps({'type': 'draft', 'content': event['content']})}\n\n"
+            elif event["type"] == "audit":
+                audit_data = event.get("data")
+                yield f"data: {json.dumps({'type': 'audit', 'data': audit_data})}\n\n"
+            elif event["type"] == "chunk":
+                yield f"data: {json.dumps({'type': 'chunk', 'content': event['content']})}\n\n"
+            elif event["type"] == "done":
+                full_response = event["response"]
+                audit_data = event.get("audit")
+                sources = event.get("sources", [])
+                
         topics = extract_topics_from_exchange(message, full_response)
         updated_topics = False
         for topic in topics:
@@ -154,7 +237,7 @@ def chat_stream():
         if updated_topics:
             save_long_term_memory(long_term_memory)
             
-        yield f"data: {json.dumps({'type': 'done', 'topics': topics})}\n\n"
+        yield f"data: {json.dumps({'type': 'done', 'response': full_response, 'audit': audit_data, 'sources': sources, 'topics': topics})}\n\n"
 
     return Response(generate(), mimetype='text/event-stream')
 
@@ -190,4 +273,6 @@ def explore_explain():
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5001))
     print(f"Starting Terence Tao AI Flask Backend on port {port}...")
+    # Initialize retriever and perform automatic blog sync
+    get_retriever()
     app.run(host='0.0.0.0', port=port, debug=True)

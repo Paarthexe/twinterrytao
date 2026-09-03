@@ -10,6 +10,7 @@ import type { GraphNode, GraphEdge } from './components/ForceGraph';
 interface SystemStatus {
   status: string;
   chroma_items: number;
+  documents_count?: number;
   model: string;
 }
 
@@ -29,6 +30,7 @@ export function App() {
   const [activeTab, setActiveTab] = useState<'chat' | 'memory' | 'explore'>('chat');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
   const [memoryData, setMemoryData] = useState<MemoryData | null>(null);
 
@@ -80,6 +82,50 @@ export function App() {
     }
   };
 
+  const handleSyncBlog = async () => {
+    setIsSyncing(true);
+    try {
+      const res = await fetch('/api/documents/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ all: true })
+      });
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || 'Failed to sync blog documents');
+      }
+      const data = await res.json();
+      await fetchHealth();
+      alert(`Blog Sync Successful!\n${data.message}\nSaved: ${data.summary?.saved ?? 0}, Updated: ${data.summary?.updated ?? 0}, Unchanged: ${data.summary?.skipped ?? 0}`);
+    } catch (err: any) {
+      alert('Failed to sync blog: ' + (err.message || String(err)));
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleSyncArxiv = async () => {
+    setIsSyncing(true);
+    try {
+      const res = await fetch('/api/arxiv/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ max_papers: 50 })
+      });
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || 'Failed to sync arXiv papers');
+      }
+      const data = await res.json();
+      await fetchHealth();
+      alert(`arXiv Research Paper Ingestion Successful!\n${data.message}\nTotal Cited Papers Discovered: ${data.summary?.total_discovered ?? 0}\nNew Papers Ingested: ${data.summary?.total_saved ?? 0}\nAlready Indexed: ${data.summary?.already_indexed ?? 0}`);
+    } catch (err: any) {
+      alert('Failed to sync arXiv papers: ' + (err.message || String(err)));
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const handleSendMessage = async (userText: string) => {
     const userMsg: ChatMessage = {
       id: Date.now().toString(),
@@ -117,7 +163,8 @@ export function App() {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
         content: data.response,
-        sources: data.sources
+        sources: data.sources,
+        audit: data.audit
       };
 
       setMessages([...newMessages, assistantMsg]);
@@ -173,6 +220,9 @@ export function App() {
         setActiveTab={setActiveTab}
         onNewChat={handleNewChat}
         onClearMemory={handleClearMemory}
+        onSyncBlog={handleSyncBlog}
+        onSyncArxiv={handleSyncArxiv}
+        isSyncing={isSyncing}
         systemStatus={systemStatus}
       />
 

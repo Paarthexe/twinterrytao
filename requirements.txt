@@ -6,3 +6,5 @@ streamlit-agraph
 rank-bm25
 flask
 flask-cors
+beautifulsoup4
+html2text

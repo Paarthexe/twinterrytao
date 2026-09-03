@@ -75,7 +75,7 @@ def load_markdown_documents(directory):
     return docs
 
 class ChromaRetriever:
-    def __init__(self):
+    def __init__(self, auto_sync_blog=True, sync_all=True):
         self.persist_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chroma_db")
         self.client = chromadb.PersistentClient(path=self.persist_dir)
         self.embedding_function = embedding_functions.DefaultEmbeddingFunction()
@@ -84,35 +84,75 @@ class ChromaRetriever:
             embedding_function=self.embedding_function,
             metadata={"hnsw:space": "cosine"}
         )
+        
+        if auto_sync_blog:
+            try:
+                from scraper import sync_tao_blog
+                print("[*] Automatically syncing all posts from Terence Tao's blog (terrytao.wordpress.com)...")
+                sync_tao_blog(all_posts=sync_all, target_dir=DOCUMENTS_DIR, verbose=True)
+            except Exception as e:
+                print(f"[!] Notice: Startup blog auto-sync skipped: {e}")
+                
         self._sync_database()
+
+    def sync_from_web(self, count=None, all_posts=True, category=None, search=None, tag=None, force=False):
+        """Scrapes Terence Tao's blog and immediately synchronizes the Chroma vector and BM25 index."""
+        from scraper import sync_tao_blog
+        summary = sync_tao_blog(
+            count=count,
+            all_posts=(all_posts if count is None else False),
+            category=category,
+            search=search,
+            tag=tag,
+            target_dir=DOCUMENTS_DIR,
+            force=force,
+            verbose=False
+        )
+        self._sync_database()
+        return summary
+
+    def sync_arxiv(self, max_papers=50, force=False):
+        """Discovers and ingests cited arXiv research papers and re-indexes the RAG store."""
+        from scraper import sync_arxiv_papers
+        summary = sync_arxiv_papers(
+            max_papers=max_papers,
+            target_dir=DOCUMENTS_DIR,
+            force=force,
+            verbose=False
+        )
+        self._sync_database()
+        return summary
+
+    def get_stats(self):
+        """Returns stats about indexed documents and chunks."""
+        docs = load_markdown_documents(DOCUMENTS_DIR)
+        chunks_count = self.collection.count()
+        return {
+            "documents_count": len(docs),
+            "chunks_count": chunks_count
+        }
 
     def _sync_database(self):
         all_docs = load_markdown_documents(DOCUMENTS_DIR)
         active_doc_ids = {doc["id"] for doc in all_docs}
         
         existing_items = self.collection.get(include=["metadatas"])
+        indexed_hashes = {}
         if existing_items and existing_items["metadatas"]:
             existing_doc_ids = {meta["doc_id"] for meta in existing_items["metadatas"] if meta and "doc_id" in meta}
             orphaned_ids = existing_doc_ids - active_doc_ids
             for o_id in orphaned_ids:
                 self.collection.delete(where={"doc_id": o_id})
+                
+            for meta in existing_items["metadatas"]:
+                if meta and "doc_id" in meta:
+                    indexed_hashes[meta["doc_id"]] = meta.get("content_hash")
         
         docs_to_index = []
         for doc in all_docs:
             doc_id, content = doc["id"], doc["content"]
             content_hash = hashlib.md5(content.encode('utf-8')).hexdigest()
-            
-            existing = self.collection.get(
-                where={"doc_id": doc_id},
-                limit=1,
-                include=["metadatas"]
-            )
-            
-            needs_indexing = True
-            if existing and existing["metadatas"]:
-                if existing["metadatas"][0].get("content_hash") == content_hash:
-                    needs_indexing = False
-            if needs_indexing:
+            if indexed_hashes.get(doc_id) != content_hash:
                 docs_to_index.append(doc)
                 
         if docs_to_index:
@@ -141,11 +181,14 @@ class ChromaRetriever:
                     })
                     
             if chunk_texts:
-                self.collection.add(
-                    ids=chunk_ids,
-                    documents=chunk_texts,
-                    metadatas=chunk_metadatas
-                )
+                print(f"[*] Embedding {len(chunk_texts)} new chunks across {len(docs_to_index)} documents into ChromaDB...")
+                batch_size = 500
+                for i in range(0, len(chunk_texts), batch_size):
+                    self.collection.add(
+                        ids=chunk_ids[i:i+batch_size],
+                        documents=chunk_texts[i:i+batch_size],
+                        metadatas=chunk_metadatas[i:i+batch_size]
+                    )
 
     def retrieve(self, query, top_k=3):
         results = self.collection.query(

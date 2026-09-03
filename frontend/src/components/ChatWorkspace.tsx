@@ -1,12 +1,36 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Sparkles, BookOpen, ShieldCheck, ChevronDown, ChevronUp, User, Loader2 } from 'lucide-react';
+import {
+  Send,
+  Sparkles,
+  BookOpen,
+  ShieldCheck,
+  ShieldAlert,
+  ChevronDown,
+  ChevronUp,
+  User,
+  Loader2,
+  FileCode,
+  FileCheck2,
+  CheckCircle2,
+  AlertTriangle
+} from 'lucide-react';
 import { MarkdownViewer } from './MarkdownViewer';
+
+export interface PeerReviewAudit {
+  status: 'pass' | 'revise';
+  issues?: string[];
+  advice?: string;
+  draft?: string;
+  extra_sources?: string[];
+  checked_sources?: string[];
+}
 
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   sources?: string[];
+  audit?: PeerReviewAudit;
   timestamp?: string;
 }
 
@@ -29,7 +53,8 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
   isLoading
 }) => {
   const [input, setInput] = useState('');
-  const [expandedSources, setExpandedSources] = useState<Record<string, boolean>>({});
+  const [expandedAudits, setExpandedAudits] = useState<Record<string, boolean>>({});
+  const [showDrafts, setShowDrafts] = useState<Record<string, boolean>>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -55,8 +80,12 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
     }
   };
 
-  const toggleSources = (msgId: string) => {
-    setExpandedSources(prev => ({ ...prev, [msgId]: !prev[msgId] }));
+  const toggleAudit = (msgId: string) => {
+    setExpandedAudits(prev => ({ ...prev, [msgId]: !prev[msgId] }));
+  };
+
+  const toggleDraft = (msgId: string) => {
+    setShowDrafts(prev => ({ ...prev, [msgId]: !prev[msgId] }));
   };
 
   return (
@@ -72,7 +101,7 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
               Terence Tao AI — Digital Twin Studio
             </h2>
             <p className="text-xs text-slate-400 max-w-md mb-5 leading-relaxed">
-              Explore mathematical reasoning, research papers, and problem-solving strategies using hybrid vector+sparse RAG and skeptic verification.
+              Explore mathematical reasoning, research papers, and problem-solving strategies using hybrid vector+sparse RAG with multi-stage skeptic peer review.
             </p>
 
             <div className="w-full max-w-xl grid grid-cols-1 sm:grid-cols-2 gap-2 text-left">
@@ -105,49 +134,142 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
               <div className={`max-w-2xl rounded-2xl p-3.5 border transition-all ${
                 msg.role === 'user'
                   ? 'bg-slate-800/90 border-slate-700/80 text-slate-100 rounded-tr-xs'
-                  : 'bg-[#0E131F] border-slate-800 text-slate-200 rounded-tl-xs shadow-sm'
+                  : 'bg-[#0E131F] border-slate-800 text-slate-200 rounded-tl-xs shadow-sm w-full'
               }`}>
                 {msg.role === 'user' ? (
                   <p className="text-xs leading-relaxed whitespace-pre-wrap">{msg.content}</p>
                 ) : (
                   <div>
-                    <MarkdownViewer content={msg.content} />
-
-                    {/* Sources & Audit Drawer */}
-                    {msg.sources && msg.sources.length > 0 && (
-                      <div className="mt-2.5 pt-2.5 border-t border-slate-800/80">
+                    {/* Collapsible Skeptic Peer Review Audit Drawer */}
+                    {msg.audit && (
+                      <div className="mb-3 rounded-xl border border-slate-800/90 bg-slate-950/60 overflow-hidden text-xs">
                         <button
-                          onClick={() => toggleSources(msg.id)}
-                          className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-200 font-mono transition"
+                          onClick={() => toggleAudit(msg.id)}
+                          className={`w-full flex items-center justify-between px-3 py-2 text-left font-mono transition-colors ${
+                            msg.audit.status === 'revise'
+                              ? 'bg-amber-950/20 hover:bg-amber-950/30 text-amber-300'
+                              : 'bg-emerald-950/20 hover:bg-emerald-950/30 text-emerald-300'
+                          }`}
                         >
-                          <BookOpen className="w-3 h-3" />
-                          <span>Retrieved Sources ({msg.sources.length})</span>
-                          {expandedSources[msg.id] ? (
-                            <ChevronUp className="w-3 h-3" />
-                          ) : (
-                            <ChevronDown className="w-3 h-3" />
-                          )}
+                          <div className="flex items-center gap-2">
+                            {msg.audit.status === 'revise' ? (
+                              <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
+                            ) : (
+                              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                            )}
+                            <span className="font-semibold text-[11px] tracking-wide">
+                              {msg.audit.status === 'revise'
+                                ? `Peer Review Audit: Revised (${msg.audit.issues?.length || 1} issues resolved)`
+                                : 'Peer Review Audit: Passed (Verified against literature)'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1 text-slate-400 text-[10px]">
+                            <span>{expandedAudits[msg.id] ? 'Hide Audit' : 'Inspect Audit'}</span>
+                            {expandedAudits[msg.id] ? (
+                              <ChevronUp className="w-3.5 h-3.5" />
+                            ) : (
+                              <ChevronDown className="w-3.5 h-3.5" />
+                            )}
+                          </div>
                         </button>
 
-                        {expandedSources[msg.id] && (
-                          <div className="mt-2 space-y-1 pl-2 border-l border-slate-700">
-                            {msg.sources.map((src, idx) => (
-                              <div key={idx} className="text-[11px] font-mono text-slate-400 bg-slate-900/80 p-1.5 rounded border border-slate-800">
-                                {src}
+                        {expandedAudits[msg.id] && (
+                          <div className="p-3 space-y-2.5 border-t border-slate-800/80 bg-slate-900/50">
+                            {/* Issues Checked */}
+                            <div>
+                              <div className="flex items-center gap-1.5 font-semibold text-slate-300 text-[11px] mb-1">
+                                {msg.audit.status === 'revise' ? (
+                                  <AlertTriangle className="w-3 h-3 text-amber-400" />
+                                ) : (
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                                )}
+                                <span>Mathematical Rigor & Factuality Assessment</span>
                               </div>
-                            ))}
+                              {msg.audit.issues && msg.audit.issues.length > 0 ? (
+                                <ul className="space-y-1 pl-2 border-l-2 border-amber-500/40 my-1">
+                                  {msg.audit.issues.map((issue, idx) => (
+                                    <li key={idx} className="text-[11px] text-amber-200/90 font-mono">
+                                      • {issue}
+                                    </li>
+                                  ))}
+                                </ul>
+                              ) : (
+                                <p className="text-[11px] text-emerald-300/80 font-mono pl-2 border-l-2 border-emerald-500/40">
+                                  All mathematical assertions, bounds, and reasoning steps are strictly grounded in retrieved literature.
+                                </p>
+                              )}
+                            </div>
+
+                            {/* Skeptic Advice */}
+                            {msg.audit.advice && (
+                              <div className="pt-1.5 border-t border-slate-800">
+                                <span className="font-semibold text-slate-400 text-[10px] uppercase tracking-wider block mb-0.5">
+                                  Skeptic Auditor Notes & Tone Guidance
+                                </span>
+                                <p className="text-[11px] text-slate-300 italic bg-slate-950/40 p-2 rounded border border-slate-800/60 font-mono">
+                                  "{msg.audit.advice}"
+                                </p>
+                              </div>
+                            )}
+
+                            {/* Raw Draft vs Final Toggle */}
+                            {msg.audit.draft && (
+                              <div className="pt-1.5 border-t border-slate-800">
+                                <button
+                                  onClick={() => toggleDraft(msg.id)}
+                                  className="flex items-center gap-1.5 text-[11px] font-mono text-slate-400 hover:text-slate-200 transition"
+                                >
+                                  <FileCode className="w-3 h-3" />
+                                  <span>{showDrafts[msg.id] ? 'Hide Raw Pre-Audit Draft' : 'View Raw Pre-Audit Draft'}</span>
+                                </button>
+                                {showDrafts[msg.id] && (
+                                  <div className="mt-2 p-2.5 rounded bg-slate-950 border border-slate-800 text-[11px] font-mono text-slate-300 max-h-48 overflow-y-auto whitespace-pre-wrap">
+                                    <div className="text-[10px] text-amber-400 font-semibold mb-1 uppercase tracking-wider">
+                                      Initial Draft (Before Skeptic Audit):
+                                    </div>
+                                    {msg.audit.draft}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Checked Sources List */}
+                            {(msg.sources && msg.sources.length > 0) && (
+                              <div className="pt-1.5 border-t border-slate-800">
+                                <div className="flex items-center gap-1 text-[10px] font-mono text-slate-400 mb-1">
+                                  <BookOpen className="w-3 h-3" />
+                                  <span>Retrieved References ({msg.sources.length}):</span>
+                                </div>
+                                <div className="flex flex-wrap gap-1">
+                                  {msg.sources.map((src, idx) => (
+                                    <span
+                                      key={idx}
+                                      className="text-[10px] font-mono bg-slate-800/80 text-slate-300 px-2 py-0.5 rounded border border-slate-700/60"
+                                    >
+                                      {src}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
                     )}
 
-                    {/* RAG & Skeptic Meta pill */}
-                    <div className="mt-2 flex items-center gap-2 text-[10px] font-mono text-slate-500">
-                      <span className="flex items-center gap-1 text-slate-400">
-                        <ShieldCheck className="w-3 h-3" /> Skeptic Audit Passed
-                      </span>
-                      <span>•</span>
-                      <span>Hybrid RRF Retrieval</span>
+                    {/* Main Assistant Content */}
+                    <MarkdownViewer content={msg.content} />
+
+                    {/* Footer Meta Badge */}
+                    <div className="mt-3 pt-2 border-t border-slate-800/60 flex items-center justify-between text-[10px] font-mono text-slate-500">
+                      <div className="flex items-center gap-2">
+                        <span className="flex items-center gap-1 text-slate-400">
+                          <FileCheck2 className="w-3 h-3 text-slate-400" /> Hybrid RAG (Dense + BM25 RRF)
+                        </span>
+                      </div>
+                      {msg.sources && (
+                        <span>{msg.sources.length} sources consulted</span>
+                      )}
                     </div>
                   </div>
                 )}
